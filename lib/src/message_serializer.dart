@@ -10,8 +10,9 @@ import 'message.dart';
 import 'utils/map_utils.dart';
 
 typedef DecoderCallback = dynamic Function(String rawData);
-typedef EncoderCallback = String Function(Object? data);
+typedef EncoderCallback = dynamic Function(Object? data);
 typedef PayloadDecoderCallback = dynamic Function(Uint8List payload);
+typedef BinaryDecoderCallback = dynamic Function(Uint8List rawData);
 
 /// Serializes and deserializes [Message] instances to and from the wire format.
 ///
@@ -25,6 +26,7 @@ class MessageSerializer {
     this.decoder = jsonDecode,
     this.encoder = jsonEncode,
     this.payloadDecoder,
+    this.binaryDecoder,
   });
 
   /// The codec name this serializer was created from.
@@ -36,6 +38,7 @@ class MessageSerializer {
   DecoderCallback decoder;
   EncoderCallback encoder;
   PayloadDecoderCallback? payloadDecoder;
+  BinaryDecoderCallback? binaryDecoder;
 
   // ── Atomic update ─────────────────────────────────────────────────────────
 
@@ -47,6 +50,7 @@ class MessageSerializer {
     DecoderCallback? decoder,
     EncoderCallback? encoder,
     PayloadDecoderCallback? payloadDecoder,
+    BinaryDecoderCallback? binaryDecoder,
     bool clearPayloadDecoder = false,
   }) {
     if (decoder != null) this.decoder = decoder;
@@ -56,6 +60,7 @@ class MessageSerializer {
     } else if (payloadDecoder != null) {
       this.payloadDecoder = payloadDecoder;
     }
+    if (binaryDecoder != null) this.binaryDecoder = binaryDecoder;
   }
 
   // ── copyWith ──────────────────────────────────────────────────────────────
@@ -68,6 +73,7 @@ class MessageSerializer {
     DecoderCallback? decoder,
     EncoderCallback? encoder,
     PayloadDecoderCallback? payloadDecoder,
+    BinaryDecoderCallback? binaryDecoder,
     bool clearPayloadDecoder = false,
   }) =>
       MessageSerializer(
@@ -77,6 +83,7 @@ class MessageSerializer {
         payloadDecoder: clearPayloadDecoder
             ? null
             : (payloadDecoder ?? this.payloadDecoder),
+        binaryDecoder: binaryDecoder ?? this.binaryDecoder,
       );
 
   // ── Encode / decode ───────────────────────────────────────────────────────
@@ -113,6 +120,24 @@ class MessageSerializer {
     }
 
     if (rawData is Uint8List) {
+      if (rawData.length >= 4 &&
+          rawData[0] == 0x42 &&
+          rawData[1] == 0x54 &&
+          rawData[2] == 0x4f &&
+          rawData[3] == 0x4e) {
+        if (binaryDecoder == null) {
+          throw ArgumentError('No binary decoder configured for $name');
+        }
+        final List<dynamic> parts = binaryDecoder!(rawData) as List<dynamic>;
+        return Message(
+          joinRef: parts[0] as String?,
+          ref: parts[1] as String?,
+          topic: parts[2] as String?,
+          event: PhoenixChannelEvent.custom(parts[3] as String),
+          payload: parts[4],
+        );
+      }
+
       final raw = BinaryDecoder.binaryDecode(rawData);
       return Message(
         joinRef: raw['join_ref'] as String?,
