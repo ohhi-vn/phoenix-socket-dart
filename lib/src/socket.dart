@@ -4,7 +4,6 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:logging/logging.dart';
-import 'package:phoenix_socket/src/utils/iterable_extensions.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:web_socket_channel/status.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -16,8 +15,6 @@ import 'exceptions.dart';
 import 'message.dart';
 import 'push.dart';
 import 'socket_options.dart';
-
-part '_stream_router.dart';
 
 /// State of a [PhoenixSocket].
 enum SocketState {
@@ -97,20 +94,10 @@ class PhoenixSocket {
   final StreamController<dynamic> _receiveStreamController =
       StreamController.broadcast();
   final String _endpoint;
-  final StreamController<Message> _topicMessages = StreamController();
 
   /// Efficient topic-based router that maps topics to stream controllers
   /// providing O(1) lookup instead of O(n) linear scan.
   final Map<String, StreamController<Message>> _topicControllers = {};
-  void _handleTopicMessage(Message message) {
-    final topic = message.topic;
-    if (topic == null || topic.isEmpty) return;
-
-    final controller = _topicControllers[topic];
-    if (controller != null && !controller.isClosed) {
-      controller.add(message);
-    }
-  }
 
   final WebSocketChannel Function(Uri uri)? _webSocketChannelFactory;
 
@@ -126,8 +113,6 @@ class PhoenixSocket {
   SocketState _socketState;
 
   WebSocketChannel? _ws;
-
-  _StreamRouter<Message>? _router;
 
   /// Stream of [PhoenixSocketOpenEvent] being produced whenever
   /// the connection is open.
@@ -174,9 +159,6 @@ class PhoenixSocket {
   Duration get defaultTimeout => _options.timeout;
 
   bool _disposed = false;
-
-  _StreamRouter<Message> get _streamRouter =>
-      _router ??= _StreamRouter<Message>(_topicMessages.stream);
 
   /// A stream yielding [Message] instances for a given topic.
   ///
@@ -341,7 +323,6 @@ class PhoenixSocket {
     _topicControllers.clear();
     _topicStreams.clear();
 
-    _topicMessages.close();
     _stateStreamController.close();
     _receiveStreamController.close();
   }
@@ -493,12 +474,6 @@ class PhoenixSocket {
   void _cancelHeartbeat() {
     _heartbeatTimeout?.cancel();
     _heartbeatTimeout = null;
-  }
-
-  /// Send heartbeat and handle the result without blocking.
-  /// This prevents heartbeat from blocking the event loop.
-  Future<void> _sendHeartbeatAsync() async {
-    await _sendHeartbeat();
   }
 
   Future<bool> _sendHeartbeat({bool ignorePreviousHeartbeat = false}) async {

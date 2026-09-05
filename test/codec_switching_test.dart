@@ -3,7 +3,6 @@ import 'dart:convert';
 
 import 'package:mockito/mockito.dart';
 import 'package:phoenix_socket/phoenix_socket.dart';
-import 'package:rxdart/rxdart.dart';
 import 'package:test/test.dart';
 
 import 'mocks.dart';
@@ -82,8 +81,9 @@ void _unregisterCodecs() {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Builds a connectable mock WebSocket that emits one heartbeat reply so
-/// PhoenixSocket._connect() succeeds, then stays silent.
+/// Builds a connectable mock WebSocket that echoes a heartbeat reply for
+/// every heartbeat frame sent to it, so PhoenixSocket._connect() succeeds
+/// on the first attempt and stays open afterwards.
 ///
 /// [encoder] must match the codec used by the socket under test — the
 /// heartbeat reply the mock emits is decoded by that socket's serializer,
@@ -94,24 +94,28 @@ void _unregisterCodecs() {
   final sink = MockWebSocketSink();
   final ws = MockWebSocketChannel();
   final sent = <dynamic>[];
-  var calls = 0;
+
+  // Persistent incoming stream: every connection attempt subscribes to it,
+  // and replies are pushed in response to frames captured in sink.add,
+  // carrying the exact ref of the request they answer.
+  final incoming = StreamController<String>.broadcast();
 
   when(ws.sink).thenReturn(sink);
   when(ws.ready).thenAnswer((_) async {});
-  when(ws.stream).thenAnswer((_) {
-    if (calls++ == 0) {
-      // First call: stay open but send nothing (connecting phase).
-      return NeverStream();
-    }
-    // Subsequent calls: emit a heartbeat reply encoded with the same codec
-    // as the socket, so the socket's decoder can parse it successfully.
-    final ctrl = StreamController<String>()
-      ..add(encoder(Message.heartbeat('0').encode()));
-    return ctrl.stream;
-  });
+  when(ws.stream).thenAnswer((_) => incoming.stream);
 
   when(sink.add(any)).thenAnswer((inv) {
-    sent.add(inv.positionalArguments.first);
+    final frame = inv.positionalArguments.first as String;
+    sent.add(frame);
+
+    final raw = frame.startsWith(_framePrefix)
+        ? frame.substring(_framePrefix.length)
+        : frame;
+    final parts = jsonDecode(raw) as List;
+
+    if (parts[3] == 'heartbeat') {
+      incoming.add(encoder(Message.heartbeat(parts[1] as String).encode()));
+    }
   });
 
   return (ws: ws, sink: sink, sent: sent);

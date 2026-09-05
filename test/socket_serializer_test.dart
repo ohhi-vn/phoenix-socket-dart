@@ -138,7 +138,6 @@ void main() {
         return result;
       };
 
-      final channel = socket.addChannel(topic: 'room:test');
       // Push immediately — the channel state will be joining/buffered,
       // but the serializer is invoked when the message hits the sink.
       // We only verify the custom encoder was installed; actual socket

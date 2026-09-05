@@ -282,9 +282,6 @@ class Push {
   /// Dispose the set of waiters associated with this push.
   void clearReceivers() => _receivers.clear();
 
-  /// Remove receivers for a specific status.
-  void _clearReceiversForStatus(String status) => _receivers.remove(status);
-
   // Remove existing waiters and reset completer
   void cleanUp() {
     if (_sent) {
