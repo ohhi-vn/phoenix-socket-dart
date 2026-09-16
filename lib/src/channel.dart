@@ -91,6 +91,13 @@ class PhoenixChannel {
 
   Push? get leavePush => _leavePush;
 
+  /// The join push of this channel.
+  ///
+  /// Re-read on every rejoin attempt — the underlying response completer is
+  /// replaced each time the channel (re)joins, so awaiting [Push.future] on
+  /// this getter always observes the latest join attempt.
+  Push get joinPush => _joinPush;
+
   /// State of the channel.
   PhoenixChannelState get state => _state;
 
