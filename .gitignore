@@ -87,3 +87,5 @@ backend-*.tar
 /example/backend/config/*.secret.exs
 /example/**/pubspec.lock
 /pubspec.lock
+._*
+.expert
