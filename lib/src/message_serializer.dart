@@ -4,7 +4,8 @@ import 'dart:typed_data';
 // Use relative imports — importing the barrel file (phoenix_socket.dart) from
 // inside lib/src/ creates a circular dependency because the barrel re-exports
 // this file. Always use relative paths within lib/src/.
-import 'utils/binary_decoder.dart';
+import 'codec/binary_codec.dart';
+import 'codec/message_decode_exception.dart';
 import 'events.dart';
 import 'message.dart';
 import 'utils/map_utils.dart';
@@ -91,10 +92,10 @@ class MessageSerializer {
   /// Encodes [message] for transmission over the WebSocket.
   ///
   /// Messages with a [Uint8List] payload use the binary frame format via
-  /// [BinaryDecoder]; all others are encoded via the current [encoder].
+  /// [BinaryCodec]; all others are encoded via the current [encoder].
   dynamic encode(Message message) {
     if (message.payload is Uint8List) {
-      return BinaryDecoder.binaryEncode(message);
+      return BinaryCodec.encode(message);
     }
     return encoder(message.encode());
   }
@@ -104,48 +105,43 @@ class MessageSerializer {
   /// [rawData] must be a [String] (JSON / text path) or a [Uint8List]
   /// (binary path). Any other type throws [ArgumentError].
   ///
-  /// This method is optimized for the common case (String messages)
-  /// to minimize overhead on the hot path.
+  /// Malformed text or binary frames throw [MessageDecodeException], a
+  /// [FormatException] subtype that identifies the failing stage.
   Message decode(dynamic rawData) {
     if (rawData is String) {
-      // Fast path: decode JSON string to Message
-      final List<dynamic> parts = decoder(rawData) as List<dynamic>;
-      return Message(
-        joinRef: parts[0] as String?,
-        ref: parts[1] as String?,
-        topic: parts[2] as String?,
-        event: PhoenixChannelEvent.custom(parts[3] as String),
-        payload: parts[4],
-      );
+      return _decodeText(rawData);
     }
 
     if (rawData is Uint8List) {
-      if (rawData.length >= 4 &&
-          rawData[0] == 0x42 &&
-          rawData[1] == 0x54 &&
-          rawData[2] == 0x4f &&
-          rawData[3] == 0x4e) {
+      if (_hasPayloadEnvelope(rawData)) {
         if (binaryDecoder == null) {
           throw ArgumentError('No binary decoder configured for $name');
         }
-        final List<dynamic> parts = binaryDecoder!(rawData) as List<dynamic>;
-        return Message(
-          joinRef: parts[0] as String?,
-          ref: parts[1] as String?,
-          topic: parts[2] as String?,
-          event: PhoenixChannelEvent.custom(parts[3] as String),
-          payload: parts[4],
-        );
+        final dynamic decoded;
+        try {
+          decoded = binaryDecoder!(rawData);
+        } on MessageDecodeException {
+          rethrow;
+        } on FormatException catch (error) {
+          throw MessageDecodeException(
+            'Failed to decode the payload envelope: ${error.message}',
+            stage: DecodeStage.payload,
+            frameLength: rawData.length,
+            source: error,
+          );
+        }
+        if (decoded is! List) {
+          throw MessageDecodeException(
+            'Binary decoder must return a Phoenix envelope List, got '
+            '${decoded.runtimeType}',
+            stage: DecodeStage.payload,
+            frameLength: rawData.length,
+          );
+        }
+        return _decodeEnvelope(decoded, DecodeStage.payload);
       }
 
-      final raw = BinaryDecoder.binaryDecode(rawData);
-      return Message(
-        joinRef: raw['join_ref'] as String?,
-        ref: raw['ref'] as String?,
-        topic: raw['topic'] as String?,
-        event: PhoenixChannelEvent.custom(raw['event'] as String),
-        payload: _decodePayload(raw['payload']),
-      );
+      return _decodeBinary(rawData);
     }
 
     throw ArgumentError(
@@ -157,6 +153,73 @@ class MessageSerializer {
   String toString() => 'MessageSerializer(name: $name)';
 
   // ── Private ───────────────────────────────────────────────────────────────
+
+  Message _decodeText(String rawData) {
+    final dynamic decoded;
+    try {
+      decoded = decoder(rawData);
+    } on MessageDecodeException {
+      rethrow;
+    } on FormatException catch (error) {
+      throw MessageDecodeException(
+        'Invalid text frame: ${error.message}',
+        stage: DecodeStage.text,
+        source: error,
+      );
+    }
+    if (decoded is! List) {
+      throw MessageDecodeException(
+        'Phoenix envelope must be a List, got ${decoded.runtimeType}',
+        stage: DecodeStage.text,
+        source: rawData,
+      );
+    }
+    return _decodeEnvelope(decoded, DecodeStage.text);
+  }
+
+  Message _decodeEnvelope(List<dynamic> parts, DecodeStage stage) {
+    try {
+      return Message.fromJson(parts);
+    } on MessageDecodeException {
+      rethrow;
+    } on FormatException catch (error) {
+      throw MessageDecodeException(
+        'Invalid Phoenix envelope: ${error.message}',
+        stage: stage,
+        source: error,
+      );
+    }
+  }
+
+  Message _decodeBinary(Uint8List rawData) {
+    final frame = BinaryCodec.decode(rawData);
+    if (frame.kind == BinaryFrameKind.reply) {
+      return Message(
+        joinRef: frame.joinRef,
+        ref: frame.ref,
+        topic: frame.topic,
+        event: PhoenixChannelEvent.reply,
+        payload: {
+          'status': frame.event,
+          'response': frame.payload,
+        },
+      );
+    }
+    return Message(
+      joinRef: frame.joinRef,
+      ref: frame.ref,
+      topic: frame.topic,
+      event: PhoenixChannelEvent.custom(frame.event),
+      payload: _decodePayload(frame.payload),
+    );
+  }
+
+  static bool _hasPayloadEnvelope(Uint8List data) =>
+      data.length >= 4 &&
+      data[0] == 0x42 &&
+      data[1] == 0x54 &&
+      data[2] == 0x4f &&
+      data[3] == 0x4e;
 
   dynamic _decodePayload(dynamic payload) {
     if (payloadDecoder == null || payload is! Uint8List) return payload;

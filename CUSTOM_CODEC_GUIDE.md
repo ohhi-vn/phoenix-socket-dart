@@ -18,8 +18,8 @@
 The three callbacks inside `MessageSerializer`:
 
 ```dart
-// Encodes a List (the Phoenix v2 wire array) to a String.
-typedef EncoderCallback = String Function(Object? data);
+// Encodes a List (the Phoenix v2 wire array); text frames require a String.
+typedef EncoderCallback = dynamic Function(Object? data);
 
 // Decodes a String back to a List.
 typedef DecoderCallback = dynamic Function(String rawData);
@@ -28,6 +28,25 @@ typedef DecoderCallback = dynamic Function(String rawData);
 // Only needed when the server sends Uint8List payloads (e.g. MessagePack body).
 typedef PayloadDecoderCallback = dynamic Function(Uint8List payload);
 ```
+
+---
+
+## Lifecycle and decoding notes
+
+- Each socket owns an independent `MessageSerializer`; use `update()` or
+  `copyWith()` instead of sharing a mutable instance between sockets.
+- A binary payload decoder is applied only to `Uint8List` payloads. Map results
+  are normalised to string keys recursively, byte results pass through, and
+  other results are wrapped as `{'data': value}`.
+- Malformed text or binary frames throw a `FormatException` subtype
+  (`MessageDecodeException` internally) carrying the failing stage. The socket
+  reports these through `errorStream` and keeps the connection usable.
+- Socket teardown is available as `disposeAsync()`; the synchronous `dispose()`
+  is still supported and delegates to it.
+- `waitForMessage(Message)` is deprecated in favour of
+  `waitForReply(String ref)`. `PhoenixChannel.onPushReply`,
+  `Push.startTimeout`, `Push.clearReceivers`, and `Push.cleanUp` are also
+  deprecated; `Push.future` and `Push.onReply` cover their use cases.
 
 ---
 

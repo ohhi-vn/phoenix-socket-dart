@@ -13,7 +13,7 @@ Future<void> main() async {
       ? null
       : 'Phoenix server unavailable on localhost:4001 '
           '(${availability.reason}) — '
-          'start the backend to run these tests.';
+          'run tool/integration_test.sh to start the local harness.';
 
   // ── Tests that require a live Phoenix server ────────────────────────────────
   group('PhoenixSocket', () {

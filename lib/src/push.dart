@@ -31,22 +31,36 @@ class PushResponse {
   /// }
   /// ```
   /// some lib decode in wrong way, payload: {response: {status: ok}}
-  /// TO-DO: need to update lib
+  ///
+  /// Non-map payloads and unexpected status types are preserved rather than
+  /// throwing a cast error.
   factory PushResponse.fromMessage(Message message) {
     final data = message.payload;
-    if (data?['status'] != null) {
-      return PushResponse(
-        status: data?['status'] as String?,
-        response: data?['response'],
-      );
-    } else {
-      final response = data?['response'];
-      return PushResponse(
-        status: response?['status'],
-        response: {},
-      );
+    if (data is Map) {
+      final status = data['status'];
+      if (status != null) {
+        return PushResponse(
+          status: _statusString(status),
+          response: data['response'],
+        );
+      }
+      final response = data['response'];
+      if (response is Map) {
+        final nestedStatus = response['status'];
+        if (nestedStatus != null) {
+          return PushResponse(
+            status: _statusString(nestedStatus),
+            response: response['response'] ?? response,
+          );
+        }
+      }
+      return PushResponse(response: data);
     }
+    return PushResponse(response: data);
   }
+
+  static String _statusString(Object status) =>
+      status is String ? status : status.toString();
 
   /// Status provided by the backend.
   ///
@@ -120,6 +134,7 @@ class Push {
   PhoenixChannelEvent? _replyEvent;
 
   Completer<PushResponse> _responseCompleter;
+  int _generation = 0;
 
   /// A future that will yield the response to the original message.
   Future<PushResponse> get future async {
@@ -154,14 +169,15 @@ class Push {
   /// This also schedules the timeout to be triggered in the future.
   Future<void> send() async {
     if (_received is PushResponse && _received!.isTimeout) {
-      _logger.warning('Trying to send push $ref after timeout');
+      _logger.warning(() => 'Trying to send push $ref after timeout');
       return;
     }
-    _logger.finer('Sending out push for $ref');
+    _logger.finer(() => 'Sending out push for $ref');
     _sent = true;
     _awaitingReply = false;
 
-    startTimeout();
+    final generation = _generation;
+    _startTimeout();
     try {
       await _channel.socket.sendMessage(Message(
         event: event!,
@@ -177,7 +193,7 @@ class Push {
         err,
         stacktrace,
       );
-      _receiveResponse(err);
+      _receiveResponse(err, generation);
     }
   }
 
@@ -201,21 +217,11 @@ class Push {
 
   /// Schedule a timeout to be triggered if no reply occurs
   /// within the expected time frame.
-  void startTimeout() {
-    if (!_awaitingReply) {
-      _channel
-          .onPushReply(replyEvent)
-          .then<void>(_receiveResponse)
-          .catchError(_receiveResponse);
-      _awaitingReply = true;
-    }
-
-    _timeoutTimer ??= Timer(timeout!, () {
-      _timeoutTimer = null;
-      _logger.warning(() => 'Push $ref timed out');
-      _channel.trigger(Message.timeoutFor(ref));
-    });
-  }
+  @Deprecated(
+    'Timeouts are scheduled automatically by send(). This member will be '
+    'removed in a future release.',
+  )
+  void startTimeout() => _startTimeout();
 
   /// Cancel the scheduled timeout for this push.
   void cancelTimeout() {
@@ -224,11 +230,53 @@ class Push {
   }
 
   /// Reset the scheduled timeout for this push.
+  ///
+  /// Any caller awaiting [future] for the previous attempt receives a
+  /// [PushSupersededException] instead of waiting forever.
   void reset() {
     cancelTimeout();
+    _supersede();
     _received = null;
     _resetRef();
     _sent = false;
+  }
+
+  /// Prepares the receiver set and completer for a new binding.
+  ///
+  /// Used by the owning channel before a rejoin attempt.
+  void rebind() {
+    if (_sent) {
+      _logger.fine('Rebinding push completer');
+      _clearReceivers();
+      _supersede();
+    }
+  }
+
+  /// Dispose the set of waiters associated with this push.
+  @Deprecated(
+    'Receiver cleanup is automatic. This member will be removed in a future '
+    'release.',
+  )
+  void clearReceivers() => _clearReceivers();
+
+  /// Remove existing waiters and reset completer.
+  @Deprecated(
+    'Use rebind(); this member will be removed in a future release.',
+  )
+  void cleanUp() => rebind();
+
+  /// Fails this push without a backend reply.
+  ///
+  /// Used when a buffered push is cancelled or the owning channel closes.
+  void fail(Object error, [StackTrace? stackTrace]) {
+    cancelTimeout();
+    _received = null;
+    _awaitingReply = false;
+    if (!_responseCompleter.isCompleted) {
+      _responseCompleter.future.ignore();
+      _responseCompleter.completeError(error, stackTrace);
+    }
+    _clearReceivers();
   }
 
   /// Trigger the appropriate waiters and future associated for this push,
@@ -257,7 +305,10 @@ class Push {
       _responseCompleter.complete(response);
     }
 
-    // Get receivers for this status and trigger them directly
+    _awaitingReply = false;
+    _timeoutTimer?.cancel();
+    _timeoutTimer = null;
+
     final status = response.status;
     final receivers = _receivers[status];
 
@@ -269,40 +320,69 @@ class Push {
     });
 
     if (receivers != null && receivers.isNotEmpty) {
-      // Trigger callbacks directly without creating a copy
-      // since we're about to clear the receivers anyway
       for (final cb in receivers) {
         cb(response);
       }
-      // Clear only the receivers for this status, not all receivers
       _receivers.remove(status);
     }
   }
 
-  /// Dispose the set of waiters associated with this push.
-  void clearReceivers() => _receivers.clear();
+  void _startTimeout() {
+    if (!_awaitingReply) {
+      _awaitingReply = true;
+      final generation = _generation;
+      try {
+        _channel
+            .waitForReply(ref)
+            .then<void>((message) => _receiveResponse(message, generation))
+            .catchError((Object error) => _receiveResponse(error, generation));
+      } catch (error) {
+        _receiveResponse(error, generation);
+      }
+    }
 
-  // Remove existing waiters and reset completer
-  void cleanUp() {
-    if (_sent) {
-      _logger.fine('Cleaning up completer');
-      clearReceivers();
-      _responseCompleter = Completer();
+    _timeoutTimer ??= Timer(timeout!, () {
+      _timeoutTimer = null;
+      _logger.warning(() => 'Push $ref timed out');
+      _channel.trigger(Message.timeoutFor(ref));
+    });
+  }
+
+  void _clearReceivers() => _receivers.clear();
+
+  void _supersede() {
+    final supersededRef = _ref;
+    if (!_responseCompleter.isCompleted) {
+      _responseCompleter.future.ignore();
+      _responseCompleter.completeError(
+          PushSupersededException(push: this, ref: supersededRef));
+    }
+    _responseCompleter = Completer<PushResponse>();
+    _generation++;
+    _awaitingReply = false;
+    if (supersededRef != null) {
+      _channel.socket.failPendingReply(
+        supersededRef,
+        PushSupersededException(push: this, ref: supersededRef),
+      );
     }
   }
 
-  void _receiveResponse(dynamic response) {
+  void _receiveResponse(dynamic response, [int? generation]) {
+    if (generation != null && generation != _generation) return;
     cancelTimeout();
     if (response is Message) {
-      if (response.event == replyEvent) {
+      if (response.event == replyEvent || response.ref == ref) {
         trigger(PushResponse.fromMessage(response));
       }
     } else if (event != PhoenixChannelEvent.join) {
       _logger.finest(
           () => "Completing with error: ${_responseCompleter.hashCode}");
+      _channel.socket.failPendingReply(ref, response);
       if (!_responseCompleter.isCompleted) {
+        _responseCompleter.future.ignore();
         _responseCompleter.completeError(response);
-        clearReceivers();
+        _clearReceivers();
       }
     }
   }

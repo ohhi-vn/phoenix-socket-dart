@@ -1,8 +1,5 @@
 // ignore_for_file: public_member_api_docs
 
-// TODO: This is a very much a non-tested port of the javascript code!
-//       Feel free to test, improve and make a pull request.
-
 import 'dart:async';
 
 import 'channel.dart';
@@ -44,10 +41,12 @@ class PhoenixPresence {
       'diff': 'presence_diff'
     },
   }) {
-    // Listens to new messages on the [channel] matching [eventNames]
-    // and processes them according to [_onMessage].
+    // Listens to new messages on the [channel] matching the configured
+    // presence event names and processes them according to [_onMessage].
     _subscription = channel.messages
-        .where((message) => eventNames.containsValue(message.event.value))
+        .where((message) =>
+            message.event.value == stateEventName ||
+            message.event.value == diffEventName)
         .listen(_onMessage);
   }
 
@@ -152,13 +151,18 @@ class PhoenixPresence {
   /// from a serialized message payload.
   Map<String, Map<String, Presence>> _decodeDiffFromPayload(
       Map<String, dynamic> payload) {
-    return payload.map((key, presence) {
-      if ((presence as Map).isEmpty) {
-        return MapEntry(key, <String, Presence>{});
+    return payload.map((group, presences) {
+      final entries = presences as Map;
+      if (entries.isEmpty) {
+        return MapEntry(group, <String, Presence>{});
       }
-      final presenceKey = (presence as Map<String, dynamic>).keys.first;
-      return MapEntry(
-          key, {presenceKey: Presence.fromJson(presenceKey, presence)});
+      final decoded = <String, Presence>{};
+      entries.forEach((key, value) {
+        if (key is String) {
+          decoded[key] = Presence.fromJson(key, {key: value});
+        }
+      });
+      return MapEntry(group, decoded);
     });
   }
 

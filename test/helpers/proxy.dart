@@ -145,7 +145,9 @@ Future<void> resetPeerThenResumeProxy([
 Future<void> _tryDeleteProxy() async {
   try {
     final response = await delete(Uri.parse('$_toxiproxy/proxies/$_proxyName'));
-    if (response.statusCode != 200 && response.statusCode != 404) {
+    if (response.statusCode != 200 &&
+        response.statusCode != 204 &&
+        response.statusCode != 404) {
       throw Exception(
         'Unexpected status ${response.statusCode} deleting proxy $_proxyName',
       );

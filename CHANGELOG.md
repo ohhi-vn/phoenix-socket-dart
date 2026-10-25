@@ -1,3 +1,65 @@
+## [Unreleased]
+
+### Fixed
+
+- `PhoenixPresence` applies every presence in a `presence_diff` frame; frames
+  joining or leaving several users at once no longer keep only the first entry.
+- `PhoenixPresence` still listens for diffs when only the state event name is
+  overridden through `eventNames`.
+- `connect()` always resolves: synchronous factory/mount-point errors, disposal
+  during an attempt, and reconnect outcomes now complete the returned future
+  instead of hanging or being swallowed by an error zone.
+- Disposal now releases owned resources once and completes pending message and
+  push futures with an error instead of dropping them.
+- Heartbeats and pending replies no longer leak completers; heartbeat timers
+  cannot accumulate across reconnects.
+- Reconnection uses one bounded, jittered delay sequence, resets after a
+  successful open, and stops after disposal.
+- Topic routing releases its controller on last unsubscribe and on channel
+  removal, so removed topics no longer accumulate.
+- `PhoenixRawSocket` exposes received raw frames and closes the stream on
+  disposal instead of owning an unreachable controller.
+- Binary framing honors `Uint8List` view offsets, validates declared lengths and
+  message kinds, rejects truncated frames with a typed error, and refuses fields
+  longer than the one-byte length limit.
+- Malformed inbound frames are reported through the socket error stream, dropped,
+  and do not cancel the transport subscription or strand pending replies.
+- Invalid options (codec + serializer, params + dynamicParams), double joins,
+  and pushes before join are rejected in release builds instead of relying on
+  assertions.
+- `PushResponse` parsing no longer casts statuses blindly and preserves nested
+  response payloads.
+
+### Added
+
+- `PhoenixSocket.disposeAsync()` — awaits full teardown; `dispose()` now delegates
+  to it.
+- `PhoenixSocket.waitForReply(String ref)`.
+- `PhoenixRawSocket.rawMessages`.
+- `PushSupersededException` — fails a push future whose attempt was replaced.
+- Decode failures now surface a `FormatException` subtype carrying the failing
+  stage, binary frame kind, and frame length.
+
+### Deprecated
+
+| Member | Replacement |
+| --- | --- |
+| `PhoenixSocket.waitForMessage(Message)` | `PhoenixSocket.waitForReply(String ref)` |
+| `PhoenixChannel.onPushReply(PhoenixChannelEvent)` | `Push.future` / `Push.onReply` |
+| `Push.startTimeout()` | automatic on `Push.send()` |
+| `Push.clearReceivers()` | automatic lifecycle management |
+| `Push.cleanUp()` | `Push.rebind()` |
+
+### Upgrade notes
+
+- No public member was removed or re-typed. Deprecated members keep working.
+- Invalid socket/channel configuration now throws in release builds as well as
+  debug builds; valid configurations are unaffected.
+- Awaiting a push future whose attempt is reset or resent now fails with
+  `PushSupersededException` instead of waiting forever.
+- Binary push frames now use the documented layout (no `ref` field), matching the
+  decoder and the Phoenix binary frame format.
+
 ## [0.8.0.]
 
 - Add binary message decoding/encoding support for message and optional payload decoder

@@ -54,9 +54,7 @@ void main() {
           1,
           1,
           1,
-          1,
           ...utf8.encode('0'),
-          ...utf8.encode('1'),
           ...utf8.encode('t'),
           ...utf8.encode('e'),
           1,
@@ -78,11 +76,9 @@ void main() {
         final expected = Uint8List.fromList([
           0,
           2,
-          1,
           3,
           2,
           ...utf8.encode('10'),
-          ...utf8.encode('1'),
           ...utf8.encode('top'),
           ...utf8.encode('ev'),
           1,
@@ -562,13 +558,13 @@ void main() {
       expect(s, same(custom));
     });
 
-    test('asserts when both codec and serializer are provided', () {
+    test('throws when both codec and serializer are provided', () {
       expect(
         () => PhoenixSocketOptions(
           codec: 'json',
           serializer: MessageSerializer(),
         ),
-        throwsA(isA<AssertionError>()),
+        throwsA(isA<ArgumentError>()),
       );
     });
 

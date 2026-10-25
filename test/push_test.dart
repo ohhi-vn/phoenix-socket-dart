@@ -36,7 +36,7 @@ void main() {
   );
 
   test(
-    'Push.future should throw if PhoenixChannel.onPushReply throws an exception',
+    'Push.future should throw if the channel reply waiter throws',
     () async {
       final mockPhoenixSocket = MockPhoenixSocket();
       final mockPhoenixChannel = MockPhoenixChannel();
@@ -44,7 +44,7 @@ void main() {
           .thenReturn(mockPhoenixChannel);
       when(mockPhoenixChannel.socket).thenReturn(mockPhoenixSocket);
       when(mockPhoenixChannel.loggerName).thenReturn('oui');
-      when(mockPhoenixChannel.onPushReply(any))
+      when(mockPhoenixChannel.waitForReply(any))
           .thenAnswer((_) async => throw Exception());
 
       var push = Push(

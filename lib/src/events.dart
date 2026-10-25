@@ -1,6 +1,3 @@
-import 'channel.dart';
-import 'socket.dart';
-
 /// Base socket event
 abstract class PhoenixSocketEvent {
   const PhoenixSocketEvent();

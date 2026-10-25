@@ -1,0 +1,20 @@
+services:
+  backend:
+    build:
+      context: ../example/backend
+      dockerfile: Dockerfile
+    ports:
+      - "4001:4001"
+      - "4002:4002"
+    healthcheck:
+      test: ["CMD", "curl", "-sS", "-o", "/dev/null", "http://localhost:4001/"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  proxy:
+    image: ghcr.io/shopify/toxiproxy
+    ports:
+      - "8474:8474"
+      - "4004:4004"

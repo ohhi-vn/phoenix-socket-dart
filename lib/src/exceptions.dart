@@ -1,7 +1,6 @@
 import 'events.dart';
 import 'message.dart';
 import 'push.dart';
-import 'socket.dart';
 
 /// Exception yield when a [PhoenixSocket] closes for unexpected reasons.
 class PhoenixException implements Exception {
@@ -53,4 +52,25 @@ class ChannelTimeoutException implements Exception {
 
 class ChannelClosedError extends StateError {
   ChannelClosedError(super.message);
+}
+
+/// Thrown when a push attempt is replaced by a newer attempt before its reply
+/// arrived.
+///
+/// Awaiting the previous [Push.future] now fails instead of hanging.
+class PushSupersededException implements Exception {
+  /// Creates an exception for [push], optionally carrying the superseded
+  /// [ref].
+  PushSupersededException({this.push, this.ref});
+
+  /// The push whose attempt was superseded, when known.
+  final Push? push;
+
+  /// The reference of the superseded attempt.
+  final String? ref;
+
+  @override
+  String toString() =>
+      'PushSupersededException: push ${ref ?? 'unknown'} was superseded by a '
+      'newer attempt';
 }

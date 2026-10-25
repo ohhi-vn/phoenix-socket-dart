@@ -47,14 +47,17 @@ class PhoenixSocketOptions {
         _heartbeatTimeout = heartbeatTimeout ?? const Duration(seconds: 10),
         _codec = codec,
         _serializer = serializer {
-    assert(
-      !(params != null && dynamicParams != null),
-      "Cannot set both params and dynamicParams",
-    );
-    assert(
-      !(codec != null && serializer != null),
-      "Cannot set both codec and serializer — choose one",
-    );
+    if (params != null && dynamicParams != null) {
+      throw ArgumentError(
+        'Cannot set both params and dynamicParams on PhoenixSocketOptions',
+      );
+    }
+    if (codec != null && serializer != null) {
+      throw ArgumentError(
+        'Cannot set both codec and serializer on PhoenixSocketOptions — '
+        'choose one',
+      );
+    }
   }
 
   final Duration _timeout;

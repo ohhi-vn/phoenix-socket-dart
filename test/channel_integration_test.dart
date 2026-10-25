@@ -13,12 +13,18 @@ import 'helpers/proxy.dart';
 Future<void> main() async {
   maybeActivateAllLogLevels();
 
-  final availability = await checkToxiproxyAvailability();
-  final skipReason = availability.isAvailable
-      ? null
-      : 'Toxiproxy unavailable on localhost:8474 '
-          '(${availability.reason}) — '
-          'start Toxiproxy and the Phoenix backend to run these tests.';
+  final toxiproxy = await checkToxiproxyAvailability();
+  final backend =
+      await checkPhoenixServerAvailability('ws://localhost:4001/socket/websocket');
+  final String? skipReason;
+  if (toxiproxy.isAvailable && backend.isAvailable) {
+    skipReason = null;
+  } else {
+    skipReason = 'Integration services unavailable '
+        '(toxiproxy: ${toxiproxy.reason ?? 'ok'}, '
+        'backend: ${backend.reason ?? 'ok'}) — '
+        'run tool/integration_test.sh to start them and run the suite.';
+  }
 
   group('PhoenixChannel', () {
     const addr = 'ws://localhost:4004/socket/websocket';

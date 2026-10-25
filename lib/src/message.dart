@@ -1,8 +1,6 @@
 import 'dart:typed_data';
 import 'package:logging/logging.dart';
-import 'channel.dart';
 import 'events.dart';
-import 'socket.dart';
 
 final Logger _logger = Logger('phoenix_socket.message');
 
@@ -12,15 +10,40 @@ class Message {
   /// Given a parsed JSON coming from the backend, yield
   /// a [Message] instance.
   ///
-  /// Optimized to avoid factory overhead on hot path.
+  /// Validates that [parts] is exactly the five-element Phoenix v2 envelope:
+  /// `[joinRef, ref, topic, event, payload]`.
   factory Message.fromJson(List<dynamic> parts) {
-    _logger.finest('Message decoded from $parts');
-    return Message(
-      joinRef: parts[0] as String?,
-      ref: parts[1] as String?,
-      topic: parts[2] as String?,
-      event: PhoenixChannelEvent.custom(parts[3] as String),
+    if (parts.length != 5) {
+      throw FormatException(
+        'Expected a 5-element Phoenix envelope, got ${parts.length}',
+      );
+    }
+    final joinRef = _envelopeString(parts[0], 'joinRef');
+    final ref = _envelopeString(parts[1], 'ref');
+    final topic = _envelopeString(parts[2], 'topic');
+    final eventName = parts[3];
+    if (eventName is! String) {
+      throw FormatException(
+        'Phoenix envelope event must be a String, got '
+        '${eventName.runtimeType}',
+      );
+    }
+    final message = Message(
+      joinRef: joinRef,
+      ref: ref,
+      topic: topic,
+      event: PhoenixChannelEvent.custom(eventName),
       payload: parts[4],
+    );
+    _logger.finest(() => 'Message decoded from $parts');
+    return message;
+  }
+
+  static String? _envelopeString(dynamic value, String field) {
+    if (value == null || value is String) return value as String?;
+    throw FormatException(
+      'Phoenix envelope $field must be a String or null, got '
+      '${value.runtimeType}',
     );
   }
 
@@ -106,7 +129,7 @@ class Message {
       event.value,
       payload,
     ];
-    _logger.finest('Message encoded to $parts');
+    _logger.finest(() => 'Message encoded to $parts');
     return parts;
   }
 

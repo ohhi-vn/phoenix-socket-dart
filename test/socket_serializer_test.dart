@@ -215,13 +215,13 @@ void main() {
       expect(s.name, equals('json'));
     });
 
-    test('providing both codec and serializer throws AssertionError', () {
+    test('providing both codec and serializer throws ArgumentError', () {
       expect(
         () => PhoenixSocketOptions(
           codec: 'json',
           serializer: MessageSerializer(),
         ),
-        throwsA(isA<AssertionError>()),
+        throwsA(isA<ArgumentError>()),
       );
     });
 
